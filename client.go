@@ -213,10 +213,11 @@ func (c *client) mainloop(ctx context.Context, params *lookupParams) {
 						continue
 					}
 					if _, ok := entries[rr.Ptr]; !ok {
+						_, service, domain := split(rr.Hdr.Name)
 						entries[rr.Ptr] = NewServiceEntry(
 							trimDot(strings.Replace(rr.Ptr, rr.Hdr.Name, "", -1)),
-							params.Service,
-							params.Domain)
+							service,
+							domain)
 					}
 					entries[rr.Ptr].TTL = rr.Hdr.Ttl
 				case *dns.SRV:
@@ -226,10 +227,11 @@ func (c *client) mainloop(ctx context.Context, params *lookupParams) {
 						continue
 					}
 					if _, ok := entries[rr.Hdr.Name]; !ok {
+						_, service, domain := split(rr.Hdr.Name)
 						entries[rr.Hdr.Name] = NewServiceEntry(
 							trimDot(strings.Replace(rr.Hdr.Name, params.ServiceName(), "", 1)),
-							params.Service,
-							params.Domain)
+							service,
+							domain)
 					}
 					entries[rr.Hdr.Name].HostName = rr.Target
 					entries[rr.Hdr.Name].Port = int(rr.Port)
@@ -241,10 +243,11 @@ func (c *client) mainloop(ctx context.Context, params *lookupParams) {
 						continue
 					}
 					if _, ok := entries[rr.Hdr.Name]; !ok {
+						_, service, domain := split(rr.Hdr.Name)
 						entries[rr.Hdr.Name] = NewServiceEntry(
 							trimDot(strings.Replace(rr.Hdr.Name, params.ServiceName(), "", 1)),
-							params.Service,
-							params.Domain)
+							service,
+							domain)
 					}
 					entries[rr.Hdr.Name].Text = rr.Txt
 					entries[rr.Hdr.Name].TTL = rr.Hdr.Ttl
