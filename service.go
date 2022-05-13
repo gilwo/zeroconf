@@ -38,6 +38,9 @@ func (s *ServiceRecord) ServiceTypeName() string {
 
 // NewServiceRecord constructs a ServiceRecord.
 func NewServiceRecord(instance, service string, domain string) *ServiceRecord {
+	if domain == "" {
+		domain = "local"
+	}
 	service, subtypes := parseSubtypes(service)
 	s := &ServiceRecord{
 		Instance:    instance,

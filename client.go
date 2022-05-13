@@ -3,7 +3,9 @@ package zeroconf
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
+	"runtime"
 	"strings"
 	"time"
 
@@ -81,10 +83,7 @@ func NewResolver(options ...ClientOption) (*Resolver, error) {
 
 // Browse for all services of a given type in a given domain.
 func (r *Resolver) Browse(ctx context.Context, service, domain string, entries chan<- *ServiceEntry) error {
-	params := defaultParams(service)
-	if domain != "" {
-		params.Domain = domain
-	}
+	params := defaultParams(service, domain)
 	params.Entries = entries
 	params.isBrowsing = true
 	ctx, cancel := context.WithCancel(ctx)
@@ -108,11 +107,8 @@ func (r *Resolver) Browse(ctx context.Context, service, domain string, entries c
 
 // Lookup a specific service by its name and type in a given domain.
 func (r *Resolver) Lookup(ctx context.Context, instance, service, domain string, entries chan<- *ServiceEntry) error {
-	params := defaultParams(service)
+	params := defaultParams(service, domain)
 	params.Instance = instance
-	if domain != "" {
-		params.Domain = domain
-	}
 	params.Entries = entries
 	ctx, cancel := context.WithCancel(ctx)
 	go r.c.mainloop(ctx, params)
@@ -134,8 +130,8 @@ func (r *Resolver) Lookup(ctx context.Context, instance, service, domain string,
 }
 
 // defaultParams returns a default set of QueryParams.
-func defaultParams(service string) *lookupParams {
-	return newLookupParams("", service, "local", false, make(chan *ServiceEntry))
+func defaultParams(service, domain string) *lookupParams {
+	return newLookupParams("", service, domain, false, make(chan *ServiceEntry))
 }
 
 // Client structure encapsulates both IPv4/IPv6 UDP connections.
@@ -213,9 +209,9 @@ func (c *client) mainloop(ctx context.Context, params *lookupParams) {
 						continue
 					}
 					if _, ok := entries[rr.Ptr]; !ok {
-						_, service, domain := split(rr.Hdr.Name)
+						instance, service, domain := split(rr.Ptr)
 						entries[rr.Ptr] = NewServiceEntry(
-							trimDot(strings.Replace(rr.Ptr, rr.Hdr.Name, "", -1)),
+							instance,
 							service,
 							domain)
 					}
@@ -227,9 +223,9 @@ func (c *client) mainloop(ctx context.Context, params *lookupParams) {
 						continue
 					}
 					if _, ok := entries[rr.Hdr.Name]; !ok {
-						_, service, domain := split(rr.Hdr.Name)
+						instance, service, domain := split(rr.Hdr.Name)
 						entries[rr.Hdr.Name] = NewServiceEntry(
-							trimDot(strings.Replace(rr.Hdr.Name, params.ServiceName(), "", 1)),
+							instance,
 							service,
 							domain)
 					}
@@ -243,9 +239,9 @@ func (c *client) mainloop(ctx context.Context, params *lookupParams) {
 						continue
 					}
 					if _, ok := entries[rr.Hdr.Name]; !ok {
-						_, service, domain := split(rr.Hdr.Name)
+						instance, service, domain := split(rr.Hdr.Name)
 						entries[rr.Hdr.Name] = NewServiceEntry(
-							trimDot(strings.Replace(rr.Hdr.Name, params.ServiceName(), "", 1)),
+							instance,
 							service,
 							domain)
 					}
@@ -445,18 +441,39 @@ func (c *client) sendQuery(msg *dns.Msg) error {
 	if err != nil {
 		return err
 	}
-	if c.ipv4conn != nil {
-		var wcm ipv4.ControlMessage
-		for ifi := range c.ifaces {
-			wcm.IfIndex = c.ifaces[ifi].Index
-			c.ipv4conn.WriteTo(buf, &wcm, ipv4Addr)
+	if runtime.GOOS == "windows" { // from  : https://github.com/davidflowerday/zeroconf/commit/e52a29d5a54886cf5b969d14e2b1d5a7d736261e
+		if c.ipv4conn != nil {
+			for ifi := range c.ifaces {
+				if err := c.ipv4conn.SetMulticastInterface(&c.ifaces[ifi]); err != nil {
+					log.Printf("[WARN] mdns: Failed to set multicast interface: %v", err)
+					continue
+				}
+				c.ipv4conn.WriteTo(buf, nil, ipv4Addr)
+			}
 		}
-	}
-	if c.ipv6conn != nil {
-		var wcm ipv6.ControlMessage
-		for ifi := range c.ifaces {
-			wcm.IfIndex = c.ifaces[ifi].Index
-			c.ipv6conn.WriteTo(buf, &wcm, ipv6Addr)
+		if c.ipv6conn != nil {
+			for ifi := range c.ifaces {
+				if err := c.ipv6conn.SetMulticastInterface(&c.ifaces[ifi]); err != nil {
+					log.Printf("[WARN] mdns: Failed to set multicast interface: %v", err)
+					continue
+				}
+				c.ipv6conn.WriteTo(buf, nil, ipv6Addr)
+			}
+		}
+	} else {
+		if c.ipv4conn != nil {
+			var wcm ipv4.ControlMessage
+			for ifi := range c.ifaces {
+				wcm.IfIndex = c.ifaces[ifi].Index
+				c.ipv4conn.WriteTo(buf, &wcm, ipv4Addr)
+			}
+		}
+		if c.ipv6conn != nil {
+			var wcm ipv6.ControlMessage
+			for ifi := range c.ifaces {
+				wcm.IfIndex = c.ifaces[ifi].Index
+				c.ipv6conn.WriteTo(buf, &wcm, ipv6Addr)
+			}
 		}
 	}
 	return nil
